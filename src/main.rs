@@ -369,7 +369,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         window.update_with_buffer(&framebuffer, WINDOW_SIZE, WINDOW_SIZE)?;
-        window
     }
 
     Ok(())
