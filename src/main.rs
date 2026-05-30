@@ -106,28 +106,28 @@ impl Interpreter {
 
             match opcode {
                 '>' => {
-                    let n = self.program[self.cursor] as usize;
+                    let n: usize = self.program[self.cursor] as usize;
                     self.cursor += 1;
 
                     self.address = (self.address + n) % MEMORY_SIZE;
                 }
 
                 '<' => {
-                    let n = self.program[self.cursor] as usize;
+                    let n: usize = self.program[self.cursor] as usize;
                     self.cursor += 1;
 
                     self.address = (self.address + MEMORY_SIZE - (n % MEMORY_SIZE)) % MEMORY_SIZE;
                 }
 
                 '+' => {
-                    let n = self.program[self.cursor] as u8;
+                    let n: u8 = self.program[self.cursor] as u8;
                     self.cursor += 1;
 
                     self.memory[self.address] = self.memory[self.address].wrapping_add(n);
                 }
 
                 '-' => {
-                    let n = self.program[self.cursor] as u8;
+                    let n: u8 = self.program[self.cursor] as u8;
                     self.cursor += 1;
 
                     self.memory[self.address] = self.memory[self.address].wrapping_sub(n);
@@ -216,19 +216,17 @@ fn is_bf_char(c: char) -> bool {
 }
 
 fn load_program(path: &str) -> io::Result<Interpreter> {
-    let mut src = File::open(path)?;
+    let mut interp: Interpreter = Interpreter::new();
 
-    let mut interp = Interpreter::new();
-
-    let mut raw = Vec::new();
-    src.read_to_end(&mut raw)?;
+    let mut raw: Vec<u8> = Vec::new();
+    (File::open(path)? as File).read_to_end(&mut raw)?;
 
     let chars: Vec<char> = raw.iter().map(|&b| b as char).collect();
 
-    let mut i = 0;
+    let mut i: usize = 0;
 
     while i < chars.len() {
-        let ch = raw[i] as char;
+        let ch: char = raw[i] as char;
         i += 1;
 
         match ch {
@@ -258,13 +256,13 @@ fn load_program(path: &str) -> io::Result<Interpreter> {
             }
 
             ']' => {
-                let close_pos = interp.program.len();
+                let close_pos: usize = interp.program.len();
 
                 interp.program.push(']' as u16);
                 interp.program.push(0u16);
 
                 let mut depth: usize = 1;
-                let mut j = close_pos;
+                let mut j: usize = close_pos;
 
                 while j > 0 && depth > 0 {
                     j -= 2;
@@ -283,7 +281,7 @@ fn load_program(path: &str) -> io::Result<Interpreter> {
                     ));
                 }
 
-                let dist = (close_pos - j) as u16;
+                let dist: u16 = (close_pos - j) as u16;
 
                 interp.program[j + 1] = dist;
                 interp.program[close_pos + 1] = dist;
@@ -344,10 +342,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     window.set_target_fps(60);
 
-    let mut framebuffer = vec![0u32; WINDOW_SIZE * WINDOW_SIZE];
+    let mut framebuffer: Vec<u32> = vec![0u32; WINDOW_SIZE * WINDOW_SIZE];
 
     let (_stream, stream_handle) = OutputStream::try_default()?;
-    let sink = Sink::try_new(&stream_handle)?;
+    let sink: Sink = Sink::try_new(&stream_handle)?;
 
     let mut current_note: u8 = 0;
 
@@ -358,7 +356,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
 
-        let note = interp.memory[interp.address];
+        let note: u8 = interp.memory[interp.address];
 
         if note != current_note {
             current_note = note;
@@ -371,5 +369,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         window.update_with_buffer(&framebuffer, WINDOW_SIZE, WINDOW_SIZE)?;
     }
 
-    Ok(())
+    return Ok(());
 }
