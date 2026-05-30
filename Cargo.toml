@@ -1,0 +1,16 @@
+[package]
+name = "rust_bf16"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+minifb = "0.27"
+rodio = "0.19"
+ 
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 256
+panic = "abort"
+strip = true
+incremental = false
