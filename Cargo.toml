@@ -13,4 +13,4 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
-incremental = false
+debug-assertions=false
