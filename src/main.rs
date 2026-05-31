@@ -1,16 +1,17 @@
 use minifb::{Key, ScaleMode, Window, WindowOptions};
-use rodio::{buffer::SamplesBuffer, OutputStream, Sink};
+use rodio::{buffer::SamplesBuffer, DeviceSinkBuilder, Player};
 use std::env;
 use std::f64::consts::PI;
 use std::fs::File;
 use std::io::{self, Read};
+use std::num::NonZero;
 
 const WINDOW_SIZE: usize = 512;
 const FB_SIZE: usize = 16;
 const PIXEL_SCALE: usize = WINDOW_SIZE / FB_SIZE;
 
 const SAMPLE_RATE: i32 = 48000;
-const AMPLITUDE: f64 = 28000.0;
+const AMPLITUDE: f32 = 0.85;
 
 const MEMORY_SIZE: usize = 30_000;
 const PROGRAM_CAP: usize = 16_777_216;
@@ -41,7 +42,7 @@ fn pixel_color(byte: u8, palette: Palette) -> u32 {
     }
 }
 
-fn make_note_buffer(pitch: u8) -> Vec<i16> {
+fn make_note_buffer(pitch: u8) -> Vec<f32> {
     let freq = 440.0 * 2f64.powf((pitch as f64 - 69.0) / 12.0);
 
     let samples = SAMPLE_RATE as usize / 6;
@@ -60,17 +61,22 @@ fn make_note_buffer(pitch: u8) -> Vec<i16> {
                 1.0
             };
 
-            (AMPLITUDE * envelope * (2.0 * PI * freq * t).sin()) as i16
+            (AMPLITUDE as f64 * envelope * (2.0 * PI * freq * t).sin()) as f32 // ← was as i16
         })
         .collect()
 }
 
-fn play_note(sink: &Sink, pitch: u8) {
+fn play_note(player_audio_stream: &Player, pitch: u8) {
+    // ← was &Sink
     let samples = make_note_buffer(pitch);
 
-    let source = SamplesBuffer::new(1, SAMPLE_RATE as u32, samples);
+    let source = SamplesBuffer::new(
+        NonZero::new(1u16).unwrap(),
+        NonZero::new(SAMPLE_RATE as u32).unwrap(),
+        samples,
+    );
 
-    sink.append(source);
+    player_audio_stream.append(source);
 }
 
 struct Interpreter {
@@ -330,7 +336,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut interp = load_program(&args[1])?;
 
     let mut window = Window::new(
-        "BF16",
+        "RUST BF16",
         WINDOW_SIZE,
         WINDOW_SIZE,
         WindowOptions {
@@ -343,13 +349,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     window.set_target_fps(60);
 
     let mut framebuffer: Vec<u32> = vec![0u32; WINDOW_SIZE * WINDOW_SIZE];
-
-    let (_stream, stream_handle) = OutputStream::try_default()?;
-    let sink: Sink = Sink::try_new(&stream_handle)?;
+    let audio_stream = DeviceSinkBuilder::open_default_sink()?;
+    let player_audio_stream = Player::connect_new(audio_stream.mixer());
 
     let mut current_note: u8 = 0;
 
-    while window.is_open() && !window.is_key_down(Key::Escape) {
+    while window.is_open() {
         render_framebuffer(&interp, &mut framebuffer, palette);
 
         if !interp.run_frame(&window) {
@@ -362,7 +367,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             current_note = note;
 
             if current_note != 0 {
-                play_note(&sink, current_note);
+                play_note(&player_audio_stream, current_note);
             }
         }
 
