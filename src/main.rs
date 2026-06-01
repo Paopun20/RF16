@@ -1,9 +1,11 @@
+mod vm;
+
 use minifb::{Key, ScaleMode, Window, WindowOptions};
 use rodio::{buffer::SamplesBuffer, DeviceSinkBuilder, Player};
 use std::env;
 use std::f64::consts::PI;
-use std::fs::File;
-use std::io::{self, Read};
+use std::fs;
+use std::io;
 use std::num::NonZero;
 
 const WINDOW_SIZE: usize = 512;
@@ -12,9 +14,6 @@ const PIXEL_SCALE: usize = WINDOW_SIZE / FB_SIZE;
 
 const SAMPLE_RATE: i32 = 48000;
 const AMPLITUDE: f32 = 0.85;
-
-const MEMORY_SIZE: usize = 30_000;
-const PROGRAM_CAP: usize = 16_777_216;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Palette {
@@ -79,233 +78,57 @@ fn play_note(player_audio_stream: &Player, pitch: u8) {
     player_audio_stream.append(source);
 }
 
-struct Interpreter {
-    program: Vec<u16>,
-    memory: [u8; MEMORY_SIZE],
-    cursor: usize,
-    address: usize,
+fn read_input(window: &Window) -> u8 {
+    let mut key = 0;
+
+    if window.is_key_down(Key::Z) {
+        key |= 0x80;
+    }
+
+    if window.is_key_down(Key::X) {
+        key |= 0x40;
+    }
+
+    if window.is_key_down(Key::Enter) {
+        key |= 0x20;
+    }
+
+    if window.is_key_down(Key::Space) {
+        key |= 0x10;
+    }
+
+    if window.is_key_down(Key::Up) {
+        key |= 0x08;
+    }
+
+    if window.is_key_down(Key::Down) {
+        key |= 0x04;
+    }
+
+    if window.is_key_down(Key::Left) {
+        key |= 0x02;
+    }
+
+    if window.is_key_down(Key::Right) {
+        key |= 0x01;
+    }
+
+    key
 }
 
-impl Interpreter {
-    fn new() -> Self {
-        Self {
-            program: Vec::with_capacity(PROGRAM_CAP),
-            memory: [0u8; MEMORY_SIZE],
-            cursor: 0,
-            address: 0,
-        }
-    }
+fn load_program(path: &str) -> io::Result<vm::VM> {
+    let raw = fs::read(path)?;
+    let source: String = raw.iter().map(|&b| b as char).collect();
 
-    fn program_size(&self) -> usize {
-        self.program.len()
-    }
-
-    fn push(&mut self, opcode: u16, operand: u16) {
-        self.program.push(opcode);
-        self.program.push(operand);
-    }
-
-    fn run_frame(&mut self, window: &Window) -> bool {
-        while self.cursor < self.program_size() {
-            let opcode = self.program[self.cursor] as u8 as char;
-            self.cursor += 1;
-
-            match opcode {
-                '>' => {
-                    let n: usize = self.program[self.cursor] as usize;
-                    self.cursor += 1;
-
-                    self.address = (self.address + n) % MEMORY_SIZE;
-                }
-
-                '<' => {
-                    let n: usize = self.program[self.cursor] as usize;
-                    self.cursor += 1;
-
-                    self.address = (self.address + MEMORY_SIZE - (n % MEMORY_SIZE)) % MEMORY_SIZE;
-                }
-
-                '+' => {
-                    let n: u8 = self.program[self.cursor] as u8;
-                    self.cursor += 1;
-
-                    self.memory[self.address] = self.memory[self.address].wrapping_add(n);
-                }
-
-                '-' => {
-                    let n: u8 = self.program[self.cursor] as u8;
-                    self.cursor += 1;
-
-                    self.memory[self.address] = self.memory[self.address].wrapping_sub(n);
-                }
-
-                '[' => {
-                    if self.memory[self.address] == 0 {
-                        self.cursor += self.program[self.cursor] as usize;
-                    }
-
-                    self.cursor += 1;
-                }
-
-                ']' => {
-                    if self.memory[self.address] != 0 {
-                        self.cursor -= self.program[self.cursor] as usize;
-                    }
-
-                    self.cursor += 1;
-                }
-
-                '.' => {
-                    self.cursor += 1;
-                    return true;
-                }
-
-                ',' => {
-                    self.cursor += 1;
-
-                    let mut key: u8 = 0;
-
-                    if window.is_key_down(Key::Z) {
-                        key |= 0x80;
-                    }
-
-                    if window.is_key_down(Key::X) {
-                        key |= 0x40;
-                    }
-
-                    if window.is_key_down(Key::Enter) {
-                        key |= 0x20;
-                    }
-
-                    if window.is_key_down(Key::Space) {
-                        key |= 0x10;
-                    }
-
-                    if window.is_key_down(Key::Up) {
-                        key |= 0x08;
-                    }
-
-                    if window.is_key_down(Key::Down) {
-                        key |= 0x04;
-                    }
-
-                    if window.is_key_down(Key::Left) {
-                        key |= 0x02;
-                    }
-
-                    if window.is_key_down(Key::Right) {
-                        key |= 0x01;
-                    }
-
-                    self.memory[self.address] = key;
-                }
-
-                '?' => {
-                    self.cursor += 1;
-
-                    println!("memory[{}]: {}", self.address, self.memory[self.address]);
-                }
-
-                _ => {
-                    eprintln!("unexpected char '{}'", opcode);
-                    self.cursor += 1;
-                }
-            }
-        }
-
-        false
-    }
+    Ok(vm::VM::new(vm::compile_bf(&source)))
 }
 
-fn is_bf_char(c: char) -> bool {
-    matches!(c, '>' | '<' | '+' | '-' | '[' | ']' | '.' | ',' | '?')
-}
-
-fn load_program(path: &str) -> io::Result<Interpreter> {
-    let mut interp: Interpreter = Interpreter::new();
-
-    let mut raw: Vec<u8> = Vec::new();
-    (File::open(path)? as File).read_to_end(&mut raw)?;
-
-    let chars: Vec<char> = raw.iter().map(|&b| b as char).collect();
-
-    let mut i: usize = 0;
-
-    while i < chars.len() {
-        let ch: char = raw[i] as char;
-        i += 1;
-
-        match ch {
-            '.' | ',' | '?' | '[' => {
-                interp.push(ch as u16, 0);
-            }
-
-            '>' | '<' | '+' | '-' => {
-                interp.program.push(ch as u16);
-
-                let operand_idx = interp.program.len();
-                interp.program.push(1u16);
-
-                loop {
-                    while i < chars.len() && !is_bf_char(chars[i]) {
-                        i += 1;
-                    }
-
-                    if i >= chars.len() || chars[i] != ch {
-                        break;
-                    }
-
-                    interp.program[operand_idx] = interp.program[operand_idx].saturating_add(1);
-
-                    i += 1;
-                }
-            }
-
-            ']' => {
-                let close_pos: usize = interp.program.len();
-
-                interp.program.push(']' as u16);
-                interp.program.push(0u16);
-
-                let mut depth: usize = 1;
-                let mut j: usize = close_pos;
-
-                while j > 0 && depth > 0 {
-                    j -= 2;
-
-                    match interp.program[j] as u8 as char {
-                        '[' => depth -= 1,
-                        ']' => depth += 1,
-                        _ => {}
-                    }
-                }
-
-                if depth > 0 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "unmatched closing bracket",
-                    ));
-                }
-
-                let dist: u16 = (close_pos - j) as u16;
-
-                interp.program[j + 1] = dist;
-                interp.program[close_pos + 1] = dist;
-            }
-
-            _ => {}
-        }
-    }
-
-    Ok(interp)
-}
-
-fn render_framebuffer(interp: &Interpreter, framebuffer: &mut [u32], palette: Palette) {
+fn render_framebuffer(interp: &vm::VM, framebuffer: &mut [u32], palette: Palette) {
     for y in 0..FB_SIZE {
         for x in 0..FB_SIZE {
             let idx = y * FB_SIZE + x;
 
-            let color = pixel_color(interp.memory[idx], palette);
+            let color = pixel_color(interp.ram[idx], palette);
 
             for sy in 0..PIXEL_SCALE {
                 for sx in 0..PIXEL_SCALE {
@@ -357,11 +180,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while window.is_open() {
         render_framebuffer(&interp, &mut framebuffer, palette);
 
-        if !interp.run_frame(&window) {
+        if !interp.run_until_output_with_input(|| read_input(&window)) {
             break;
         }
 
-        let note: u8 = interp.memory[interp.address];
+        let note = interp.ram[interp.ptr];
 
         if note != current_note {
             current_note = note;
@@ -374,5 +197,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         window.update_with_buffer(&framebuffer, WINDOW_SIZE, WINDOW_SIZE)?;
     }
 
-    return Ok(());
+    Ok(())
 }

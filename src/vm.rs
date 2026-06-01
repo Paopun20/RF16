@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 pub const RAM_SIZE: usize = 65536;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     Add(i16),
     Move(i16),
@@ -11,12 +11,20 @@ pub enum Op {
 
     Input,
     Output,
+    Debug,
 
     JumpIfZero(usize),
     JumpIfNonZero(usize),
 
     Clear,
 
+    Halt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepEvent {
+    Continue,
+    Output,
     Halt,
 }
 
@@ -29,7 +37,7 @@ pub struct VM {
 
     pub program: Vec<Op>,
 
-    pub input_buffer: Vec<u8>,
+    pub input_buffer: VecDeque<u8>,
     pub output_buffer: Vec<u8>,
 }
 
@@ -43,8 +51,7 @@ impl VM {
             running: true,
 
             program,
-
-            input_buffer: Vec::new(),
+            input_buffer: VecDeque::new(),
             output_buffer: Vec::new(),
         }
     }
@@ -59,17 +66,25 @@ impl VM {
         self.ptr = 0;
         self.pc = 0;
         self.running = true;
+        self.input_buffer.clear();
         self.output_buffer.clear();
     }
 
-    pub fn step(&mut self) {
+    pub fn step(&mut self) -> StepEvent {
+        self.step_with_input(|| None)
+    }
+
+    pub fn step_with_input<F>(&mut self, mut read_input: F) -> StepEvent
+    where
+        F: FnMut() -> Option<u8>,
+    {
         if !self.running {
-            return;
+            return StepEvent::Halt;
         }
 
         if self.pc >= self.program.len() {
             self.running = false;
-            return;
+            return StepEvent::Halt;
         }
 
         let op = self.program[self.pc];
@@ -81,8 +96,8 @@ impl VM {
             }
 
             Op::Move(v) => {
-                self.ptr = ((self.ptr as isize + v as isize)
-                    .rem_euclid(RAM_SIZE as isize)) as usize;
+                self.ptr =
+                    ((self.ptr as isize + v as isize).rem_euclid(RAM_SIZE as isize)) as usize;
             }
 
             Op::Set(v) => {
@@ -90,30 +105,34 @@ impl VM {
             }
 
             Op::Input => {
-                let value = if self.input_buffer.is_empty() {
-                    0
-                } else {
-                    self.input_buffer.remove(0)
-                };
+                let value = read_input()
+                    .or_else(|| self.input_buffer.pop_front())
+                    .unwrap_or(0);
 
                 *self.current_cell() = value;
             }
 
             Op::Output => {
-                self.output_buffer.push(*self.current_cell());
+                self.output_buffer.push(self.ram[self.ptr]);
+                self.pc += 1;
+                return StepEvent::Output;
+            }
+
+            Op::Debug => {
+                println!("memory[{}]: {}", self.ptr, self.ram[self.ptr]);
             }
 
             Op::JumpIfZero(target) => {
                 if *self.current_cell() == 0 {
                     self.pc = target;
-                    return;
+                    return StepEvent::Continue;
                 }
             }
 
             Op::JumpIfNonZero(target) => {
                 if *self.current_cell() != 0 {
                     self.pc = target;
-                    return;
+                    return StepEvent::Continue;
                 }
             }
 
@@ -123,15 +142,30 @@ impl VM {
 
             Op::Halt => {
                 self.running = false;
+                return StepEvent::Halt;
             }
         }
 
         self.pc += 1;
+        StepEvent::Continue
     }
 
     pub fn run(&mut self) {
         while self.running {
             self.step();
+        }
+    }
+
+    pub fn run_until_output_with_input<F>(&mut self, mut read_input: F) -> bool
+    where
+        F: FnMut() -> u8,
+    {
+        loop {
+            match self.step_with_input(|| Some(read_input())) {
+                StepEvent::Continue => {}
+                StepEvent::Output => return true,
+                StepEvent::Halt => return false,
+            }
         }
     }
 }
@@ -195,6 +229,10 @@ pub fn compile_bf(source: &str) -> Vec<Op> {
                 program.push(Op::Input);
             }
 
+            '?' => {
+                program.push(Op::Debug);
+            }
+
             '[' => {
                 let pos = program.len();
 
@@ -204,9 +242,7 @@ pub fn compile_bf(source: &str) -> Vec<Op> {
             }
 
             ']' => {
-                let start = loop_stack
-                    .pop()
-                    .expect("Unmatched closing bracket");
+                let start = loop_stack.pop().expect("Unmatched closing bracket");
 
                 let end = program.len();
 
@@ -222,6 +258,8 @@ pub fn compile_bf(source: &str) -> Vec<Op> {
         i += 1;
     }
 
+    assert!(loop_stack.is_empty(), "Unmatched opening bracket");
+
     for (from, to) in jump_map {
         match &mut program[from] {
             Op::JumpIfZero(target) => *target = to,
@@ -233,4 +271,44 @@ pub fn compile_bf(source: &str) -> Vec<Op> {
     program.push(Op::Halt);
 
     program
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compile_coalesces_runs_and_keeps_frame_outputs() {
+        assert_eq!(
+            compile_bf("+++-->>.<"),
+            vec![Op::Add(1), Op::Move(2), Op::Output, Op::Move(-1), Op::Halt]
+        );
+    }
+
+    #[test]
+    fn vm_runs_loops_and_wraps_cells() {
+        let mut vm = VM::new(compile_bf("+++[>+<-]>."));
+
+        assert!(vm.run_until_output_with_input(|| 0));
+        assert_eq!(vm.output_buffer, vec![3]);
+        assert_eq!(vm.ram[0], 0);
+        assert_eq!(vm.ram[1], 3);
+    }
+
+    #[test]
+    fn input_callback_is_used_for_each_input_instruction() {
+        let inputs = [0x12, 0x34];
+        let mut input_idx = 0;
+        let mut vm = VM::new(compile_bf(",>,.<."));
+
+        assert!(vm.run_until_output_with_input(|| {
+            let value = inputs[input_idx];
+            input_idx += 1;
+            value
+        }));
+        assert_eq!(vm.output_buffer, vec![0x34]);
+
+        assert!(vm.run_until_output_with_input(|| 0));
+        assert_eq!(vm.output_buffer, vec![0x34, 0x12]);
+    }
 }
