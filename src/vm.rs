@@ -96,7 +96,7 @@ impl VM {
             }
 
             Op::Move(v) => {
-                self.ptr = (self.ptr as isize + v as isize) as usize & RAM_SIZE;
+                self.ptr = ((self.ptr as isize + v as isize) as usize) % RAM_SIZE;
             }
 
             Op::Set(v) => {
