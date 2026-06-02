@@ -296,6 +296,24 @@ mod tests {
     }
 
     #[test]
+    fn compile_folds_decrement_clear_loop_into_clear_op() {
+        assert_eq!(compile_bf("[-]"), vec![Op::Clear, Op::Halt]);
+    }
+
+    #[test]
+    fn compile_folds_increment_clear_loop_into_clear_op() {
+        // [+] also clears — wrapping u8 arithmetic guarantees it terminates at zero.
+        assert_eq!(compile_bf("[+]"), vec![Op::Clear, Op::Halt]);
+    }
+
+    #[test]
+    fn clear_op_zeroes_nonzero_cell() {
+        let mut vm = VM::new(compile_bf("+++[-]"));
+        vm.run();
+        assert_eq!(vm.ram[0], 0);
+    }
+
+    #[test]
     fn vm_runs_loops_and_wraps_cells() {
         let mut vm = VM::new(compile_bf("+++[>+<-]>."));
 
