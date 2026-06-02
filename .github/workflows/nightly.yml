@@ -1,0 +1,107 @@
+name: Nightly Rust
+
+on:
+  push:
+    branches: ["dev"]
+  pull_request:
+    branches: ["dev"]
+  workflow_dispatch:
+    inputs:
+      nightly:
+        description: "Create nightly release"
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+            artifact-name: rf16-linux
+
+          - os: windows-latest
+            target: windows
+            artifact-name: rf16-windows
+
+          - os: macos-latest
+            target: macos
+            artifact-name: rf16-macos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        shell: bash
+        run: |
+          cargo build --release --message-format=json -q \
+            | jq -r 'select(.reason=="compiler-artifact" and .executable != null) | .executable' \
+            | tail -n 1 \
+            | sed 's/\\/\//g' > executable_path.txt
+
+      - name: Zip artifact (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: zip -j "${{ matrix.artifact-name }}.zip" "$(cat executable_path.txt)"
+
+      - name: Zip artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-Content executable_path.txt
+          Compress-Archive -Path $exe -DestinationPath "${{ matrix.artifact-name }}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-name }}.zip
+          if-no-files-found: error
+
+
+  create-nightly-release:
+    name: Nightly Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    if: (github.event_name == 'push' || inputs.nightly) && !cancelled() && !failure()
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts/ -type f
+
+      - name: Publish nightly
+        uses: andelf/nightly-release@v1  # ← pin to a tag, not @main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: nightly
+          name: Development Build
+          body: |
+            This is a nightly build of **RF16** for commit ${{ github.sha }} from ${{ github.ref_name }} branch.
+
+            This is a development release of **RF16**.
+            It is not recommended for production use.
+            Please use this version only for testing and development.
+          files: |
+            artifacts/**/*.zip
