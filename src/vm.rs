@@ -233,10 +233,21 @@ pub fn compile_bf(source: &str) -> Vec<Op> {
             }
 
             '[' => {
+                // Peephole: [-] and [+] are both clear loops. Since cells are u8 and
+                // wrapping is defined, decrementing or incrementing any nonzero value
+                // will eventually reach zero, so both forms are safe to fold into Clear.
+                let is_clear_loop = i + 2 < chars.len()
+                    && (chars[i + 1] == '-' || chars[i + 1] == '+')
+                    && chars[i + 2] == ']';
+
+                if is_clear_loop {
+                    program.push(Op::Clear);
+                    i += 3;
+                    continue;
+                }
+
                 let pos = program.len();
-
                 loop_stack.push(pos);
-
                 program.push(Op::JumpIfZero(0));
             }
 
