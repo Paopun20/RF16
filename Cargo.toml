@@ -1,5 +1,5 @@
 [package]
-name = "bf16jit"
+name = "rf16"
 version = "0.1.0"
 edition = "2021"
 
