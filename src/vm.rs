@@ -174,7 +174,7 @@ pub fn compile_bf(source: &str) -> Vec<Op> {
 
     let mut program = Vec::new();
     let mut loop_stack = Vec::new();
-    let mut jump_map: Vec<(usize, usize)> = Vec::new();
+    let mut jump_map: HashMap<usize, usize> = HashMap::new();
 
     let mut i = 0;
 
