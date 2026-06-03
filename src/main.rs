@@ -41,32 +41,30 @@ fn pixel_color(byte: u8, palette: Palette) -> u32 {
     }
 }
 
+fn envelope(i: usize, attack: usize, samples: usize) -> f64 {
+    if i < attack {
+        i as f64 / attack as f64
+    } else if i > samples - attack {
+        (samples - i) as f64 / attack as f64
+    } else {
+        1.0
+    }
+}
+
 fn make_note_buffer(pitch: u8) -> Vec<f32> {
     let freq = 440.0 * 2f64.powf((pitch as f64 - 69.0) / 12.0);
-
     let samples = SAMPLE_RATE as usize / 6;
     let attack = SAMPLE_RATE as usize / 50;
-    let release_start = samples - attack;
 
     (0..samples)
         .map(|i| {
             let t = i as f64 / SAMPLE_RATE as f64;
-
-            let envelope = if i < attack {
-                i as f64 / attack as f64
-            } else if i > release_start {
-                (samples - i) as f64 / attack as f64
-            } else {
-                1.0
-            };
-
-            (AMPLITUDE as f64 * envelope * (2.0 * PI * freq * t).sin()) as f32 // ← was as i16
+            (AMPLITUDE as f64 * envelope(i, attack, samples) * (2.0 * PI * freq * t).sin()) as f32
         })
         .collect()
 }
 
 fn play_note(player_audio_stream: &Player, pitch: u8) {
-    // ← was &Sink
     let samples = make_note_buffer(pitch);
 
     let source = SamplesBuffer::new(
