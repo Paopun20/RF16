@@ -56,7 +56,6 @@ impl VM {
         }
     }
 
-    #[inline(always)]
     pub fn current_cell(&mut self) -> &mut u8 {
         &mut self.ram[self.ptr]
     }
