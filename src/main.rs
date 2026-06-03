@@ -123,21 +123,19 @@ fn load_program(path: &str) -> io::Result<vm::VM> {
     Ok(vm::VM::new(vm::compile_bf(&source)))
 }
 
+fn write_scaled_pixel(framebuffer: &mut [u32], x: usize, y: usize, color: u32) {
+    for sy in 0..PIXEL_SCALE {
+        for sx in 0..PIXEL_SCALE {
+            framebuffer[(y * PIXEL_SCALE + sy) * WINDOW_SIZE + (x * PIXEL_SCALE + sx)] = color;
+        }
+    }
+}
+
 fn render_framebuffer(interp: &vm::VM, framebuffer: &mut [u32], palette: Palette) {
     for y in 0..FB_SIZE {
         for x in 0..FB_SIZE {
-            let idx = y * FB_SIZE + x;
-
-            let color = pixel_color(interp.ram[idx], palette);
-
-            for sy in 0..PIXEL_SCALE {
-                for sx in 0..PIXEL_SCALE {
-                    let px = x * PIXEL_SCALE + sx;
-                    let py = y * PIXEL_SCALE + sy;
-
-                    framebuffer[py * WINDOW_SIZE + px] = color;
-                }
-            }
+            let color = pixel_color(interp.ram[y * FB_SIZE + x], palette);
+            write_scaled_pixel(framebuffer, x, y, color);
         }
     }
 }
@@ -186,12 +184,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let note = interp.ram[interp.ptr];
 
-        if note != current_note {
+        if note == current_note { /* skip */ } else {
             current_note = note;
-
             if current_note != 0 {
                 play_note(&player_audio_stream, current_note);
-            }
+             }
         }
 
         window.update_with_buffer(&framebuffer, WINDOW_SIZE, WINDOW_SIZE)?;
