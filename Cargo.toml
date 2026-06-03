@@ -10,7 +10,6 @@ rodio = "0.22.2"
 [profile.release]
 opt-level = 3
 lto = "fat"
-codegen-units = 1024
 panic = "abort"
 strip = true
 debug-assertions=false
